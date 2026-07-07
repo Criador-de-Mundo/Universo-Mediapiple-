@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Chronos Cosmos – Visual Realista</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      font-family: 'Segoe UI', 'Arial', sans-serif;
+      background-color: #000000;
+    }
+
+    /* Painéis superiores */
+    #time-indicator,
+    #gesture-left,
+    #gesture-right {
+      position: absolute;
+      color: #ffffff;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(6px);
+      padding: 8px 18px;
+      border-radius: 30px;
+      border: 1px solid rgba(212, 175, 55, 0.5);
+      pointer-events: none;
+      z-index: 5;
+      font-size: 16px;
+      letter-spacing: 0.5px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+    }
+
+    #time-indicator { top: 20px; right: 20px; }
+    #gesture-left   { top: 20px; left: 20px; }
+    #gesture-right  { top: 75px; left: 20px; }
+
+    #camera-message {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: #ffffff;
+      font-size: 22px;
+      text-align: center;
+      background: rgba(0,0,0,0.8);
+      padding: 24px;
+      border-radius: 20px;
+      display: none;
+      z-index: 10;
+      border: 1px solid #d4af37;
+    }
+
+    #input-video { display: none; }
+    #hand-overlay {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 3;
+    }
+  </style>
+</head>
+<body>
+  <div id="time-indicator">⏳ Tempo: Normal (1x)</div>
+  <div id="gesture-left">🤚 Esquerda: --</div>
+  <div id="gesture-right">🤚 Direita: --</div>
+  <div id="camera-message">
+    📷 Sem acesso à câmera.<br>O cosmos aguarda suas mãos.
+  </div>
+
+  <video id="input-video" playsinline></video>
+  <canvas id="hand-overlay"></canvas>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.157.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.157.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+    // ========== CENA COM FUNDO REALISTA ==========
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x000000); // preto absoluto
+
+    const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 6, 12);
+    camera.lookAt(0, 0, 0);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.body.appendChild(renderer.domElement);
+
+    const labelRenderer = new CSS2DRenderer();
+    labelRenderer.setSize(window.innerWidth, window.innerHeight);
+    labelRenderer.domElement.style.position = 'absolute';
+    labelRenderer.domElement.style.top = '0px';
+    labelRenderer.domElement.style.left = '0px';
+    labelRenderer.domElement.style.pointerEvents = 'none';
+    document.body.appendChild(labelRenderer.domElement);
+
+    // ========== LUZES ==========
+    const ambientLight = new THREE.AmbientLight(0x111122);
+    scene.add(ambientLight);
+    const sunLight = new THREE.PointLight(0xffeedd, 60, 60);
+    sunLight.position.set(0, 0, 0);
+    sunLight.castShadow = true;
+    sunLight.shadow.mapSize.width = 1024;
+    sunLight.shadow.mapSize.height = 1024;
+    scene.add(sunLight);
+
+    // ========== ESTRELAS REALISTAS ==========
+    function createRealisticStarfield() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 2048;
+      canvas.height = 1024;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Estrelas pequenas e médias
+      for (let i = 0; i < 3000; i++) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        const radius = Math.random() * 1.8 + 0.2;
+        const brightness = Math.floor(Math.random() * 200 + 55); // 55-255
+        // Cores sutis: maioria branca, algumas azuladas ou amareladas
+        const r = brightness;
+        const g = brightness - Math.floor(Math.random() * 20);
+        const b = brightness + Math.floor(Math.random() * 30);
+        ctx.fillStyle = `rgb(${r}, ${g}, ${Math.min(255, b)})`;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Algumas estrelas maiores com brilho
+      for (let i = 0; i < 150; i++) {
+        const x = Math.random() * canvas.width;
+        const y = Math.random() * canvas.height;
+        const radius = Math.random() * 2.5 + 1;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+        // Halo suave
+        const gradient = ctx.createRadialGradient(x, y, radius, x, y, radius * 3);
+        gradient.addColorStop(0, 'rgba(255,255,255,0.8)');
+        gradient.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(x, y, radius * 3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Nebulosa muito tênue em uma região
+      const nebulaGradient = ctx.createRadialGradient(300, 200, 50, 300, 200, 500);
+      nebulaGradient.addColorStop(0, 'rgba(20, 10, 40, 0.15)');
+      nebulaGradient.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = nebulaGradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    const starsGeometry = new THREE.SphereGeometry(90, 64, 64);
+    const starsMaterial = new THREE.MeshBasicMaterial({
+      map: createRealisticStarfield(),
+      side: THREE.BackSide,
+      transparent: true,
+      opacity: 0.95
+    });
+    const starsSphere = new THREE.Mesh(starsGeometry, starsMaterial);
+    scene.add(starsSphere);
+
+    // ========== SOL ==========
+    const sunGeometry = new THREE.SphereGeometry(1.5, 64, 64);
+    const sunMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffaa00,
+      emissive: new THREE.Color(0xff5500),
+      roughness: 0.2,
+    });
+    const sun = new THREE.Mesh(sunGeometry, sunMaterial);
+    scene.add(sun);
+
+    // ========== LABEL ESTILIZADO (mais visível) ==========
+    function createLabel(text, color = '#ffffff') {
+      const div = document.createElement('div');
+      div.textContent = text;
+      div.style.color = '#ffffff';
+      div.style.fontFamily = 'Segoe UI, Arial, sans-serif';
+      div.style.fontSize = '16px';
+      div.style.fontWeight = '600';
+      div.style.textShadow = '0 0 8px rgba(0,0,0,0.9)';
+      div.style.background = 'rgba(0, 0, 0, 0.75)';
+      div.style.padding = '4px 14px';
+      div.style.borderRadius = '20px';
+      div.style.border = '1px solid rgba(212, 175, 55, 0.6)';
+      div.style.letterSpacing = '0.4px';
+      const label = new CSS2DObject(div);
+      label.position.set(0, 0.9, 0);
+      return label;
+    }
+
+    sun.add(createLabel('Sol', '#ffaa00'));
+
+    // ========== TERRA ==========
+    const earthGroup = new THREE.Group();
+    scene.add(earthGroup);
+    const earthOrbitRadius = 4;
+
+    function createOrbitLine(radius, color, opacity = 0.2) {
+      const points = [];
+      for (let i = 0; i <= 128; i++) {
+        const angle = (i / 128) * Math.PI * 2;
+        points.push(new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius));
+      }
+      const geo = new THREE.BufferGeometry().setFromPoints(points);
+      return new THREE.Line(geo, new THREE.LineBasicMaterial({ color, transparent: true, opacity }));
+    }
+    scene.add(createOrbitLine(earthOrbitRadius, 0x4488aa, 0.25));
+
+    const earthTexture = (() => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256; canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#1a4d8c'; ctx.fillRect(0,0,256,128);
+      // Continentes simplificados
+      ctx.fillStyle = '#3a7cc3';
+      ctx.beginPath(); ctx.arc(60,50,35,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(180,40,30,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(120,80,25,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#ffffff'; ctx.globalAlpha = 0.2;
+      for (let i=0; i<40; i++) { ctx.beginPath(); ctx.arc(Math.random()*256, Math.random()*128, Math.random()*18+4,0,Math.PI*2); ctx.fill(); }
+      ctx.globalAlpha = 1;
+      return new THREE.CanvasTexture(canvas);
+    })();
+
+    const earth = new THREE.Mesh(
+      new THREE.SphereGeometry(0.5, 32, 32),
+      new THREE.MeshStandardMaterial({ map: earthTexture, roughness: 0.7, metalness: 0.05 })
+    );
+    earth.castShadow = true; earth.receiveShadow = true;
+    earth.position.set(earthOrbitRadius, 0, 0);
+    earthGroup.add(earth);
+    earth.add(createLabel('Terra', '#4488ff'));
+
+    // ========== LUA ==========
+    const moonGroup = new THREE.Group();
+    moonGroup.position.copy(earth.position);
+    earthGroup.add(moonGroup);
+    const moonOrbitRadius = 1.2;
+    const moonOrbitVisual = createOrbitLine(moonOrbitRadius, 0x666688, 0.15);
+    earth.add(moonOrbitVisual);
+
+    const moonTexture = (() => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 128; canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#aaaaaa'; ctx.fillRect(0,0,128,64);
+      for (let i=0; i<30; i++) {
+        ctx.fillStyle = `rgb(${180+Math.random()*40}, ${180+Math.random()*40}, ${180+Math.random()*40})`;
+        ctx.beginPath(); ctx.arc(Math.random()*128, Math.random()*64, Math.random()*8+2,0,Math.PI*2); ctx.fill();
+      }
+      return new THREE.CanvasTexture(canvas);
+    })();
+
+    const moon = new THREE.Mesh(
+      new THREE.SphereGeometry(0.15, 16, 16),
+      new THREE.MeshStandardMaterial({ map: moonTexture, roughness: 0.9 })
+    );
+    moon.castShadow = true; moon.receiveShadow = true;
+    moon.position.set(moonOrbitRadius, 0, 0);
+    moonGroup.add(moon);
+    moon.add(createLabel('Lua', '#cccccc'));
+
+    // ========== CINTURÃO DE ASTEROIDES ==========
+    const asteroidCount = 500;
+    const asteroidBelt = new THREE.InstancedMesh(
+      new THREE.SphereGeometry(0.03, 4, 4),
+      new THREE.MeshStandardMaterial({ color: 0x887766, roughness: 0.8 }),
+      asteroidCount
+    );
+    asteroidBelt.castShadow = true; asteroidBelt.receiveShadow = true;
+    scene.add(asteroidBelt);
+    const dummy = new THREE.Object3D();
+    for (let i = 0; i < asteroidCount; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const radius = 5.5 + Math.random() * 1.0;
+      const yOffset = (Math.random() - 0.5) * 0.4;
+      dummy.position.set(Math.cos(angle) * radius, yOffset, Math.sin(angle) * radius);
+      dummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+      dummy.updateMatrix();
+      asteroidBelt.setMatrixAt(i, dummy.matrix);
+    }
+    asteroidBelt.instanceMatrix.needsUpdate = true;
+
+    // ========== VARIÁVEIS DE TEMPO E NAVEGAÇÃO ==========
+    let timeSpeed = 1.0;
+    const timeIndicator = document.getElementById('time-indicator');
+    const gestureLeftIndicator = document.getElementById('gesture-left');
+    const gestureRightIndicator = document.getElementById('gesture-right');
+
+    const navState = {
+      rotating: false,
+      lastRotationX: 0,
+      lastRotationY: 0,
+      zooming: false,
+      lastPinchY: 0,
+      targetTheta: null,
+      targetPhi: null,
+      targetDistance: null,
+    };
+
+    const spherical = new THREE.Spherical().setFromVector3(camera.position);
+    navState.targetTheta = spherical.theta;
+    navState.targetPhi = spherical.phi;
+    navState.targetDistance = spherical.radius;
+
+    function updateTimeIndicator() {
+      let modeText = '';
+      if (timeSpeed === 0) modeText = '⏸️ Pausado';
+      else if (timeSpeed === 1) modeText = '⏳ Normal (1x)';
+      else if (timeSpeed === 2) modeText = '⏩ Avanço (2x)';
+      else if (timeSpeed < 0) modeText = '⏪ Reverso (' + Math.abs(timeSpeed) + 'x)';
+      timeIndicator.textContent = modeText;
+    }
+
+    // ========== MEDIAPIPE ==========
+    const videoElement = document.getElementById('input-video');
+    const handOverlayCanvas = document.getElementById('hand-overlay');
+    const handOverlayCtx = handOverlayCanvas.getContext('2d');
+    const cameraMessage = document.getElementById('camera-message');
+
+    function onHandsResults(results) {
+      handOverlayCanvas.width = window.innerWidth;
+      handOverlayCanvas.height = window.innerHeight;
+      handOverlayCtx.clearRect(0, 0, handOverlayCanvas.width, handOverlayCanvas.height);
+
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        cameraMessage.style.display = 'none';
+
+        for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+          const landmarks = results.multiHandLandmarks[i];
+          const handedness = results.multiHandedness[i]?.label;
+          const color = handedness === 'Left' ? '#d4af37' : '#44aaff';
+          drawHandLandmarks(landmarks, color);
+
+          if (handedness === 'Left') {
+            const gesture = classifyGesture(landmarks);
+            gestureLeftIndicator.textContent = `🤚 Esquerda: ${gestureMapUI(gesture)}`;
+            applyGestureToTime(gesture);
+          } else if (handedness === 'Right') {
+            const gesture = classifyGesture(landmarks);
+            gestureRightIndicator.textContent = `🤚 Direita: ${gestureMapUI(gesture)}`;
+            applyGestureToNavigation(gesture, landmarks);
+          }
+        }
+
+        const foundLeft = results.multiHandedness.some(h => h.label === 'Left');
+        const foundRight = results.multiHandedness.some(h => h.label === 'Right');
+        if (!foundLeft) gestureLeftIndicator.textContent = '🤚 Esquerda: --';
+        if (!foundRight) gestureRightIndicator.textContent = '🤚 Direita: --';
+      } else {
+        gestureLeftIndicator.textContent = '🤚 Esquerda: --';
+        gestureRightIndicator.textContent = '🤚 Direita: --';
+      }
+    }
+
+    function gestureMapUI(gesture) {
+      const map = {
+        'open_palm': '🖐️ Aberta',
+        'fist': '✊ Punho',
+        'index_up': '☝️ Indicador',
+        'v_sign': '✌️ V',
+        'neutral': '🤚 Neutro'
+      };
+      return map[gesture] || '--';
+    }
+
+    function drawHandLandmarks(landmarks, color) {
+      handOverlayCtx.fillStyle = color;
+      handOverlayCtx.strokeStyle = color;
+      handOverlayCtx.lineWidth = 2;
+      for (let i = 0; i < landmarks.length; i++) {
+        const x = landmarks[i].x * handOverlayCanvas.width;
+        const y = landmarks[i].y * handOverlayCanvas.height;
+        handOverlayCtx.beginPath();
+        handOverlayCtx.arc(x, y, 4, 0, 2 * Math.PI);
+        handOverlayCtx.fill();
+      }
+      const connections = [
+        [0,1],[1,2],[2,3],[3,4],
+        [0,5],[5,6],[6,7],[7,8],
+        [0,9],[9,10],[10,11],[11,12],
+        [0,13],[13,14],[14,15],[15,16],
+        [0,17],[17,18],[18,19],[19,20]
+      ];
+      handOverlayCtx.beginPath();
+      for (const [a,b] of connections) {
+        handOverlayCtx.moveTo(landmarks[a].x * handOverlayCanvas.width, landmarks[a].y * handOverlayCanvas.height);
+        handOverlayCtx.lineTo(landmarks[b].x * handOverlayCanvas.width, landmarks[b].y * handOverlayCanvas.height);
+      }
+      handOverlayCtx.stroke();
+    }
+
+    function classifyGesture(landmarks) {
+      const thumbTip = landmarks[4];
+      const indexTip = landmarks[8];
+      const middleTip = landmarks[12];
+      const ringTip = landmarks[16];
+      const pinkyTip = landmarks[20];
+      const indexBase = landmarks[5];
+      const middleBase = landmarks[9];
+      const ringBase = landmarks[13];
+      const pinkyBase = landmarks[17];
+      const thumbBase = landmarks[2];
+
+      const isIndexExtended = indexTip.y < indexBase.y;
+      const isMiddleExtended = middleTip.y < middleBase.y;
+      const isRingExtended = ringTip.y < ringBase.y;
+      const isPinkyExtended = pinkyTip.y < pinkyBase.y;
+      const isThumbOpen = Math.abs(thumbTip.x - thumbBase.x) > 0.05;
+      const extendedCount = [isIndexExtended, isMiddleExtended, isRingExtended, isPinkyExtended].filter(Boolean).length;
+
+      if (extendedCount === 0 && !isThumbOpen) return 'fist';
+      if (isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended) return 'index_up';
+      if (isIndexExtended && isMiddleExtended && !isRingExtended && !isPinkyExtended) return 'v_sign';
+      if (extendedCount >= 3 && isThumbOpen) return 'open_palm';
+      return 'neutral';
+    }
+
+    function applyGestureToTime(gesture) {
+      switch(gesture) {
+        case 'open_palm': timeSpeed = 1; break;
+        case 'fist': timeSpeed = 0; break;
+        case 'index_up': timeSpeed = 2; break;
+        case 'v_sign': timeSpeed = -1; break;
+      }
+      updateTimeIndicator();
+    }
+
+    // ========== NAVEGAÇÃO ==========
+    const ROTATE_SPEED = 1.5;
+    const ZOOM_SPEED = 5;
+    const MIN_DISTANCE = 3;
+    const MAX_DISTANCE = 30;
+    const DEAD_ZONE = 0.008;
+    const SMOOTH_FACTOR = 0.15;
+
+    function applyGestureToNavigation(gesture, landmarks) {
+      const thumbTip = landmarks[4];
+      const indexTip = landmarks[8];
+      const handBase = landmarks[0];
+      const pinchDistance = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
+      const isPinching = pinchDistance < 0.05;
+
+      if (isPinching) {
+        if (!navState.zooming) {
+          navState.zooming = true;
+          navState.lastPinchY = thumbTip.y;
+        }
+        const deltaY = thumbTip.y - navState.lastPinchY;
+        if (Math.abs(deltaY) > DEAD_ZONE) {
+          navState.targetDistance *= (1 - deltaY * ZOOM_SPEED);
+          navState.targetDistance = Math.max(MIN_DISTANCE, Math.min(MAX_DISTANCE, navState.targetDistance));
+        }
+        navState.lastPinchY = thumbTip.y;
+      } else {
+        navState.zooming = false;
+      }
+
+      if (gesture === 'open_palm' && !isPinching) {
+        if (!navState.rotating) {
+          navState.rotating = true;
+          navState.lastRotationX = handBase.x;
+          navState.lastRotationY = handBase.y;
+        }
+        const deltaX = handBase.x - navState.lastRotationX;
+        const deltaY = handBase.y - navState.lastRotationY;
+        if (Math.abs(deltaX) > DEAD_ZONE || Math.abs(deltaY) > DEAD_ZONE) {
+          navState.targetTheta -= deltaX * ROTATE_SPEED;
+          navState.targetPhi -= deltaY * ROTATE_SPEED;
+          navState.targetPhi = Math.max(0.1, Math.min(Math.PI - 0.1, navState.targetPhi));
+        }
+        navState.lastRotationX = handBase.x;
+        navState.lastRotationY = handBase.y;
+      } else {
+        navState.rotating = false;
+      }
+    }
+
+    function smoothCamera() {
+      const currentSpherical = new THREE.Spherical().setFromVector3(camera.position);
+      let deltaTheta = navState.targetTheta - currentSpherical.theta;
+      if (deltaTheta > Math.PI) deltaTheta -= 2 * Math.PI;
+      if (deltaTheta < -Math.PI) deltaTheta += 2 * Math.PI;
+      currentSpherical.theta += deltaTheta * SMOOTH_FACTOR;
+      currentSpherical.phi += (navState.targetPhi - currentSpherical.phi) * SMOOTH_FACTOR;
+      currentSpherical.radius += (navState.targetDistance - currentSpherical.radius) * SMOOTH_FACTOR;
+      camera.position.setFromSpherical(currentSpherical);
+      camera.lookAt(0, 0, 0);
+    }
+
+    // Inicializa MediaPipe
+    const hands = new Hands({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    });
+    hands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.6
+    });
+    hands.onResults(onHandsResults);
+
+    const cameraUtils = new Camera(videoElement, {
+      onFrame: async () => { await hands.send({ image: videoElement }); },
+      width: 640,
+      height: 480
+    });
+
+    async function startCamera() {
+      try {
+        await cameraUtils.start();
+        cameraMessage.style.display = 'none';
+      } catch (err) {
+        console.warn('Câmera não disponível:', err);
+        cameraMessage.style.display = 'block';
+      }
+    }
+    startCamera();
+
+    // ========== LOOP ==========
+    const clock = new THREE.Clock();
+    function animate() {
+      const delta = clock.getDelta();
+      const effectiveDelta = delta * timeSpeed;
+
+      sun.rotation.y += 0.1 * effectiveDelta;
+      earthGroup.rotation.y += 0.5 * effectiveDelta;
+      moonGroup.rotation.y += 2.5 * effectiveDelta;
+      earth.rotation.y += 1.2 * effectiveDelta;
+      moon.rotation.y += 0.3 * effectiveDelta;
+      asteroidBelt.rotation.y += 0.05 * effectiveDelta;
+      starsSphere.rotation.y += 0.005 * effectiveDelta;
+
+      smoothCamera();
+
+      renderer.render(scene, camera);
+      labelRenderer.render(scene, camera);
+
+      requestAnimationFrame(animate);
+    }
+    animate();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      labelRenderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    console.log('🌌 Chronos Cosmos – Visual realista ativo.');
+  </script>
+</body>
+</html>
